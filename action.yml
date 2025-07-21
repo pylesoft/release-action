@@ -49,34 +49,34 @@ runs:
               git tag "$VERSION"
               git push origin "$VERSION"
 
-              # Prepare release command
-              RELEASE_CMD="gh release create \"$VERSION\" --title \"$VERSION\""
+              # Build gh release create command arguments as array
+              ARGS=("gh" "release" "create" "$VERSION" "--title" "$VERSION")
 
               # Add notes generation
               if [[ -n "$PREVIOUS_VERSION" ]]; then
                 # Use specific previous version for changelog
                 if git tag | grep -q "^$PREVIOUS_VERSION$"; then
-                  RELEASE_CMD="$RELEASE_CMD --notes-start-tag \"$PREVIOUS_VERSION\""
+                  ARGS+=("--generate-notes" "--notes-start-tag" "$PREVIOUS_VERSION")
                   echo "✅ Using $PREVIOUS_VERSION as starting point for changelog"
                 else
                   echo "⚠️ Previous version $PREVIOUS_VERSION not found as tag, using auto-generate"
-                  RELEASE_CMD="$RELEASE_CMD --generate-notes"
+                  ARGS+=("--generate-notes")
                 fi
               else
                 # Auto-detect previous version
-                RELEASE_CMD="$RELEASE_CMD --generate-notes"
+                ARGS+=("--generate-notes")
               fi
 
               # Add draft/publish flag
               if [[ "$IS_DRAFT" == "true" ]]; then
-                RELEASE_CMD="$RELEASE_CMD --draft"
+                ARGS+=("--draft")
               else
-                RELEASE_CMD="$RELEASE_CMD --latest"
+                ARGS+=("--latest")
               fi
 
               # Execute release command
-              echo "🎯 Executing: $RELEASE_CMD"
-              eval $RELEASE_CMD
+              echo "🎯 Executing: ${ARGS[*]}"
+              "${ARGS[@]}"
 
               if [[ "$IS_DRAFT" == "true" ]]; then
                 echo "📝 Draft release created: $VERSION"
