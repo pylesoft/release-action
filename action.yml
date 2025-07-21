@@ -1,0 +1,126 @@
+name: "Release Action"
+description: "Create release with automatic branch creation"
+
+inputs:
+    version:
+        description: "Release version (e.g., 2025.29.0)"
+        required: true
+    previous-version:
+        description: "Previous version for changelog (e.g., 2025.28.0) - leave empty for auto-detect"
+        required: false
+        default: ""
+    draft:
+        description: "Create as draft (true/false)"
+        required: false
+        default: "false"
+
+runs:
+    using: "composite"
+    steps:
+        - name: Create release
+          shell: bash
+          env:
+              GITHUB_TOKEN: ${{ github.token }}
+          run: |
+              VERSION="${{ inputs.version }}"
+              PREVIOUS_VERSION="${{ inputs.previous-version }}"
+              IS_DRAFT="${{ inputs.draft }}"
+
+              echo "🚀 Creating release $VERSION (draft: $IS_DRAFT)"
+              if [[ -n "$PREVIOUS_VERSION" ]]; then
+                echo "📝 Generating changelog from $PREVIOUS_VERSION to $VERSION"
+              else
+                echo "📝 Auto-detecting previous version for changelog"
+              fi
+
+              # Delete existing release/tag if exists
+              if gh release view "$VERSION" >/dev/null 2>&1; then
+                echo "🗑️ Deleting existing release: $VERSION"
+                gh release delete "$VERSION" --yes || true
+              fi
+
+              if git tag | grep -q "^$VERSION$"; then
+                echo "🗑️ Deleting existing tag: $VERSION"
+                git tag -d "$VERSION" || true
+                git push origin ":refs/tags/$VERSION" || true
+              fi
+
+              # Create tag
+              git tag "$VERSION"
+              git push origin "$VERSION"
+
+              # Prepare release command
+              RELEASE_CMD="gh release create \"$VERSION\" --title \"$VERSION\""
+
+              # Add notes generation
+              if [[ -n "$PREVIOUS_VERSION" ]]; then
+                # Use specific previous version for changelog
+                if git tag | grep -q "^$PREVIOUS_VERSION$"; then
+                  RELEASE_CMD="$RELEASE_CMD --notes-start-tag \"$PREVIOUS_VERSION\""
+                  echo "✅ Using $PREVIOUS_VERSION as starting point for changelog"
+                else
+                  echo "⚠️ Previous version $PREVIOUS_VERSION not found as tag, using auto-generate"
+                  RELEASE_CMD="$RELEASE_CMD --generate-notes"
+                fi
+              else
+                # Auto-detect previous version
+                RELEASE_CMD="$RELEASE_CMD --generate-notes"
+              fi
+
+              # Add draft/publish flag
+              if [[ "$IS_DRAFT" == "true" ]]; then
+                RELEASE_CMD="$RELEASE_CMD --draft"
+              else
+                RELEASE_CMD="$RELEASE_CMD --latest"
+              fi
+
+              # Execute release command
+              echo "🎯 Executing: $RELEASE_CMD"
+              eval $RELEASE_CMD
+
+              if [[ "$IS_DRAFT" == "true" ]]; then
+                echo "📝 Draft release created: $VERSION"
+              else
+                echo "🚀 Release published: $VERSION"
+              fi
+
+        - name: Create release branch
+          shell: bash
+          run: |
+              VERSION="${{ inputs.version }}"
+
+              # Generate branch name (2025.29.0 -> 2025.29.x)
+              if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.[0-9]+$ ]]; then
+                BRANCH_NAME="${BASH_REMATCH[1]}.x"
+              else
+                BRANCH_NAME="${VERSION}.x"
+              fi
+
+              echo "🌿 Creating release branch: $BRANCH_NAME"
+
+              # Create or update branch
+              COMMIT_SHA=$(git rev-parse "$VERSION")
+
+              if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+                echo "🔄 Updating existing branch"
+                git checkout -B "$BRANCH_NAME" "$COMMIT_SHA"
+                git push origin "$BRANCH_NAME" --force
+              else
+                echo "🆕 Creating new branch"
+                git checkout -b "$BRANCH_NAME" "$COMMIT_SHA"
+                git push origin "$BRANCH_NAME"
+              fi
+
+              echo "✅ Release branch created: $BRANCH_NAME"
+
+        - name: Summary
+          shell: bash
+          run: |
+              echo "✅ Release workflow completed!"
+              echo "🏷️ Version: ${{ inputs.version }}"
+              echo "📝 Draft: ${{ inputs.draft }}"
+              if [[ "${{ inputs.draft }}" == "true" ]]; then
+                echo "📋 Review your draft release and publish when ready"
+              else
+                echo "🚀 Release is live!"
+              fi
